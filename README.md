@@ -1,5 +1,7 @@
 # Alchemist Strategy
 
+**Live app:** https://alchemist-strategy-bpn4gepktc39g7scubjppb.streamlit.app/
+
 A rule-based ETF accumulation strategy on **Nifty 50**, **Bank Nifty** and **Gold** ETFs, with a backtester and a Google Sheets tracker. No stock picking, no charts, no indicators.
 
 The strategy originates with Mahesh Kaushik (2022) and was enhanced by the "Fire in India" channel in its *Alchemist 2026* videos (January and September 2026). This repository is an independent re-implementation built from those videos. It is not affiliated with the author, and it is not investment advice. Any profit or loss is yours.
@@ -86,7 +88,9 @@ python -c "import alchemist_backtest as A; A.build_snapshot()"
 
 then commit the updated `data/prices.csv`.
 
-**Deploy on Streamlit Community Cloud:** push this repo to GitHub, open https://share.streamlit.io, choose *Create app*, select this repository, branch `main` and main file `app.py`, then deploy.
+**Live version:** https://alchemist-strategy-bpn4gepktc39g7scubjppb.streamlit.app/
+
+**Deploy your own on Streamlit Community Cloud:** push this repo to GitHub, open https://share.streamlit.io, choose *Create app*, select this repository, branch `main` and main file `app.py`, then deploy.
 
 ## Tracker (Google Sheets)
 
