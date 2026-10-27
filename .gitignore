@@ -1,0 +1,6 @@
+.venv/
+.idea/
+.price_cache/
+__pycache__/
+sold_log.csv
+*.pyc
