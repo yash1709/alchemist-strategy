@@ -102,7 +102,27 @@ def split_adjust(s):
     return s
 
 
-def load_prices(tickers, start, end):
+SNAPSHOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "prices.csv")
+
+
+def build_snapshot(start="2022-08-01", end=None):
+    """Download split-adjusted closes for every ETF in PAIRS (+gold) and bundle them in data/prices.csv,
+    so hosted apps never need to reach NSE."""
+    end = end or str(pd.Timestamp.today().date())
+    tickers = sorted({t for p in PAIRS for t in p[:2]} | {GOLD, BENCH})
+    px = load_prices(tickers, start, end, use_snapshot=False)
+    os.makedirs(os.path.dirname(SNAPSHOT), exist_ok=True)
+    px.to_csv(SNAPSHOT)
+    return px
+
+
+def load_prices(tickers, start, end, use_snapshot=True):
+    if use_snapshot and os.path.exists(SNAPSHOT):
+        snap = pd.read_csv(SNAPSHOT, index_col=0, parse_dates=True)
+        if all(t in snap.columns for t in tickers):
+            sl = snap.loc[pd.Timestamp(start):pd.Timestamp(end), tickers]
+            if len(sl):
+                return sl.dropna(how="all")
     cols = {}
     for t in tickers:
         try:
@@ -118,7 +138,7 @@ def load_prices(tickers, start, end):
 
 def run(start, end, capital=100_000.0, lump_pct=0.06, sip_pct=0.016, bud_frac=0.5,
         target=0.05, t2_trigger=-0.05, bud_thresh=0.80, bud_fall=-0.03,
-        reinvest=False, use_bud=True, pairs=PAIRS):
+        reinvest=False, use_bud=True, pairs=PAIRS, verbose=True):
     tickers = sorted({t for p in pairs for t in p[:2]} | {GOLD, BENCH})
     px = load_prices(tickers, start, end)
     avail = [t for t in tickers if t in px.columns and px[t].notna().any()]
@@ -126,7 +146,7 @@ def run(start, end, capital=100_000.0, lump_pct=0.06, sip_pct=0.016, bud_frac=0.
     if not pairs:
         raise SystemExit("No ETF pairs with data; edit PAIRS.")
     dropped = sorted(set(tickers) - set(avail))
-    if dropped:
+    if dropped and verbose:
         print("No data (skipped):", dropped)
     px = px.ffill()
 
@@ -143,6 +163,7 @@ def run(start, end, capital=100_000.0, lump_pct=0.06, sip_pct=0.016, bud_frac=0.
     flows = []          # ETF cash flows for XIRR (gold excluded: funded by profit)
     max_inv, inv_series, n_sells, max_ships = 0.0, [], 0, 0
     sold_log = []
+    daily = []          # (date, deployed, overall profit, mode)
     C = capital
 
     def price(t, d):
@@ -228,6 +249,10 @@ def run(start, end, capital=100_000.0, lump_pct=0.06, sip_pct=0.016, bud_frac=0.
         cur = sum(x.invested for x in all_pos())
         max_inv = max(max_inv, cur)
         inv_series.append(cur)
+        open_pl = sum(x.units * price(x.ticker, d) - x.invested for x in all_pos() if x.units and price(x.ticker, d))
+        g = price(GOLD, d)
+        gold_pl = (gold_units * g - gold_cost) if g else 0.0
+        daily.append((d, cur, realized + open_pl + gold_pl, mode))
 
     last = days[-1]
     open_val = sum(x.units * price(x.ticker, last) for x in all_pos() if x.units)
@@ -239,15 +264,30 @@ def run(start, end, capital=100_000.0, lump_pct=0.06, sip_pct=0.016, bud_frac=0.
     bench = px[BENCH].dropna()
     bench_ret = bench.iloc[-1] / bench.iloc[0] - 1
 
-    print(f"\nPeriod: {days[0].date()} -> {last.date()}   capital: {capital:,.0f}   reinvest={reinvest}")
-    print(f"Sells booked: {n_sells}   Realised ETF profit: {realized:,.0f}")
-    print(f"Open ETF value: {open_val:,.0f} (cost {open_cost:,.0f})   Max invested: {max_inv:,.0f}   "
-          f"Avg invested: {np.mean(inv_series):,.0f}")
-    print(f"Gold value: {gold_val:,.0f} (cost {gold_cost:,.0f})")
-    print(f"OVERALL profit: {overall:,.0f}  = {overall / capital:.2%} of capital")
-    print(f"XIRR (ETF legs only): {xirr(sorted(flows)):.2%}")
-    print(f"Benchmark lump-sum {BENCH}: {bench_ret:.2%}")
-    return pd.DataFrame(sold_log, columns=["date", "etf", "cost", "proceeds", "profit"])
+    x = xirr(sorted(flows))
+    if verbose:
+        print(f"\nPeriod: {days[0].date()} -> {last.date()}   capital: {capital:,.0f}   reinvest={reinvest}")
+        print(f"Sells booked: {n_sells}   Realised ETF profit: {realized:,.0f}")
+        print(f"Open ETF value: {open_val:,.0f} (cost {open_cost:,.0f})   Max invested: {max_inv:,.0f}   "
+              f"Avg invested: {np.mean(inv_series):,.0f}")
+        print(f"Gold value: {gold_val:,.0f} (cost {gold_cost:,.0f})")
+        print(f"OVERALL profit: {overall:,.0f}  = {overall / capital:.2%} of capital")
+        print(f"XIRR (ETF legs only): {x:.2%}")
+        print(f"Benchmark lump-sum {BENCH}: {bench_ret:.2%}")
+
+    series = pd.DataFrame(daily, columns=["date", "deployed", "profit", "mode"]).set_index("date")
+    b = px[BENCH].reindex(series.index).ffill()
+    series["benchmark_profit"] = capital * (b / b.iloc[0] - 1)
+    return {
+        "log": pd.DataFrame(sold_log, columns=["date", "etf", "cost", "proceeds", "profit"]),
+        "series": series,
+        "start": days[0], "end": last, "pairs": pairs,
+        "sells": n_sells, "realized": realized, "open_value": open_val, "open_cost": open_cost,
+        "max_invested": max_inv, "avg_invested": float(np.mean(inv_series)),
+        "gold_value": gold_val, "gold_cost": gold_cost,
+        "overall": overall, "overall_pct": overall / capital, "xirr": x, "benchmark_pct": bench_ret,
+        "bud_days": int((series["mode"] == "BUD").sum()),
+    }
 
 
 if __name__ == "__main__":
@@ -259,6 +299,6 @@ if __name__ == "__main__":
     ap.add_argument("--no-bud", action="store_true")
     ap.add_argument("--reinvest", action="store_true")
     a = ap.parse_args()
-    log = run(a.start, a.end, a.capital, target=a.target, use_bud=not a.no_bud, reinvest=a.reinvest)
-    log.to_csv("sold_log.csv", index=False)
+    res = run(a.start, a.end, a.capital, target=a.target, use_bud=not a.no_bud, reinvest=a.reinvest)
+    res["log"].to_csv("sold_log.csv", index=False)
     print("Trade log -> sold_log.csv")

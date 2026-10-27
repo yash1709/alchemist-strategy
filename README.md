@@ -32,6 +32,8 @@ The ETF codes come from the "ETFs Selection" slide of the January video. The day
 |---|---|
 | `STRATEGY.md` | The strategy playbook: rules, parameters, checklist |
 | `alchemist_backtest.py` | Backtester (NSE prices, split-adjusted) |
+| `app.py` | Streamlit web app (backtest, charts, rules, mode comparison) |
+| `data/prices.csv` | Bundled split-adjusted ETF prices so the app needs no live data feed |
 | `build_tracker.py` | Generates the Google Sheets / Excel tracker |
 | `Alchemist_Tracker.xlsx` | The generated tracker, ready to upload |
 | `requirements.txt` | Python dependencies |
@@ -68,6 +70,23 @@ Price data comes from NSE through `jugaad-data`, cached in `.price_cache/`. ETF 
 - Fills at the daily close, whole units, no brokerage or tax.
 - In Bud mode, flat Track 1 ETFs do not restart with a lump sum, and the Track 2 trigger is paused. The videos don't specify either case.
 - Profit is invested in GOLDBEES on the day it is booked and never sold.
+
+## Web app (Streamlit)
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+The app reads prices from the bundled `data/prices.csv`, so it works offline and on hosted platforms where NSE blocks cloud IPs. To refresh the data (for example monthly), run:
+
+```bash
+python -c "import alchemist_backtest as A; A.build_snapshot()"
+```
+
+then commit the updated `data/prices.csv`.
+
+**Deploy on Streamlit Community Cloud:** push this repo to GitHub, open https://share.streamlit.io, choose *Create app*, select this repository, branch `main` and main file `app.py`, then deploy.
 
 ## Tracker (Google Sheets)
 
